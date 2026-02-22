@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Bala.Application\Bala.Application.csproj" />
+    <ProjectReference Include="..\Bala.Infrastructure\Bala.Infrastructure.csproj" />
+    <ProjectReference Include="..\Bala.Domain\Bala.Domain.csproj" />
+    <ProjectReference Include="..\Bala.Shared\Bala.Shared.csproj" />
+  </ItemGroup>
+</Project>
