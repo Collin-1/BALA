@@ -8,7 +8,12 @@ namespace Bala.Infrastructure.Extraction;
 
 public class HtmlToTextConverter : IHtmlToTextConverter
 {
-    private static readonly string[] NoiseTags = { "script", "style", "nav", "header", "footer", "aside", "form" };
+    private static readonly string[] NoiseTags = { "script", "style", "nav", "header", "footer", "aside", "form", "iframe", "noscript" };
+
+    private static readonly string[] NoiseClassFragments =
+    {
+        "ad", "ads", "advert", "sponsor", "sponsored", "promo", "promoted", "newsletter", "cookie"
+    };
 
     public string Convert(string html)
     {
@@ -24,6 +29,8 @@ public class HtmlToTextConverter : IHtmlToTextConverter
                 node.Remove();
             }
         }
+
+        RemoveByClassOrId(doc.DocumentNode);
 
         var articleNode = doc.DocumentNode.SelectSingleNode("//article");
         HtmlNode contentNode;
@@ -104,5 +111,35 @@ public class HtmlToTextConverter : IHtmlToTextConverter
         }
 
         return best;
+    }
+
+    private static void RemoveByClassOrId(HtmlNode root)
+    {
+        var toRemove = new List<HtmlNode>();
+        foreach (var node in root.Descendants())
+        {
+            if (node.NodeType != HtmlNodeType.Element) continue;
+            var cls = node.GetAttributeValue("class", string.Empty).ToLowerInvariant();
+            var id = node.GetAttributeValue("id", string.Empty).ToLowerInvariant();
+            if (MatchesNoise(cls) || MatchesNoise(id))
+            {
+                toRemove.Add(node);
+            }
+        }
+
+        foreach (var n in toRemove)
+        {
+            n.Remove();
+        }
+    }
+
+    private static bool MatchesNoise(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        foreach (var frag in NoiseClassFragments)
+        {
+            if (value.Contains(frag, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
     }
 }
