@@ -24,20 +24,12 @@ public class PlaywrightArticleExtractor : IArticleExtractor, IAsyncDisposable
             ViewportSize = null
         });
         var page = await context.NewPageAsync();
-        page.SetDefaultTimeout(15000);
+        page.SetDefaultTimeout(25000);
 
         await page.GotoAsync(url, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-        var articleHandle = await page.QuerySelectorAsync("article");
-        string html;
-        if (articleHandle != null)
-        {
-            html = await articleHandle.InnerHTMLAsync();
-        }
-        else
-        {
-            html = await page.ContentAsync();
-        }
+        var html = await ExtractMainContentHtmlAsync(page);
 
         var cleanText = _converter.Convert(html);
         var language = _converter.DetectLanguage(cleanText);
@@ -46,6 +38,35 @@ public class PlaywrightArticleExtractor : IArticleExtractor, IAsyncDisposable
         var title = await page.TitleAsync();
 
         return new ExtractedArticle(url, title, cleanText, language, wordCount, estimatedMinutes, hash);
+    }
+
+    private static async Task<string> ExtractMainContentHtmlAsync(IPage page)
+    {
+        const string script = @"() => {
+            const removeSelectors = [
+                'script', 'style', 'nav', 'header', 'footer', 'aside', 'form', 'noscript',
+                'iframe', 'svg', '.ad', '.advertisement', '.ads', '.promo', '.newsletter', '.cookie'
+            ];
+            removeSelectors.forEach(sel => {
+                document.querySelectorAll(sel).forEach(n => n.remove());
+            });
+
+            const preferred = document.querySelector('article') || document.querySelector('main');
+            if (preferred && preferred.innerText.trim().length > 500) {
+                return preferred.innerHTML;
+            }
+
+            const candidates = Array.from(document.querySelectorAll('article, main, section, div'))
+                .map(el => ({ el, score: (el.innerText || '').length }))
+                .filter(x => x.score > 500);
+
+            candidates.sort((a, b) => b.score - a.score);
+            const best = candidates.length ? candidates[0].el : document.body;
+            return best.innerHTML || document.body.innerHTML;
+        }";
+
+        var result = await page.EvaluateAsync<string>(script);
+        return string.IsNullOrWhiteSpace(result) ? await page.ContentAsync() : result;
     }
 
     private async Task<IBrowser> GetBrowserAsync(CancellationToken cancellationToken)
