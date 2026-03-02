@@ -10,9 +10,6 @@
     button:hover { background: #eef2ff; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .bala-meta { display: flex; justify-content: space-between; color: #475569; font-size: 12px; margin-top: 8px; }
-    .bala-guide { margin-top: 8px; padding: 8px; border: 1px solid #d0d7de; border-radius: 8px; background: #f8fafc; color: #334155; font-size: 12px; line-height: 1.5; max-height: 120px; overflow: auto; display: none; }
-    .bala-guide.active { display: block; }
-    .bala-guide mark { background: #fde68a; color: #111827; padding: 0 2px; border-radius: 3px; }
     .bala-slider { width: 100%; }
     .bala-select { width: 100%; padding: 6px; border-radius: 8px; border: 1px solid #d0d7de; background: #fff; color: #0f172a; }
     .dark .bala-frame { background: #0f172a; color: #e2e8f0; border-color: #1e293b; box-shadow: 0 6px 18px rgba(0,0,0,0.4); }
@@ -21,8 +18,6 @@
     .dark .bala-badge { background: #6366f1; }
     .dark .bala-title { color: #e2e8f0; }
     .dark .bala-meta { color: #cbd5e1; }
-    .dark .bala-guide { background: #1e293b; color: #e2e8f0; border-color: #334155; }
-    .dark .bala-guide mark { background: #818cf8; color: #0f172a; }
   `;
 
   class BalaReader extends HTMLElement {
@@ -44,10 +39,17 @@
       this.url = this.getAttribute("url");
       this.position = this.getAttribute("position") || "inline";
       this.trackEnabled = this.getAttribute("track") === "true";
-      this.currentChunkText = "";
       this.pageTrackNodes = [];
       this.pageTrackIndex = 0;
+      this.pageTrackNodeOffset = 0;
+      this.pageTrackName = "bala-current-word";
+      this.supportsCssHighlights =
+        typeof window !== "undefined" &&
+        typeof window.Highlight !== "undefined" &&
+        !!window.CSS &&
+        !!window.CSS.highlights;
       this.pageTrackActiveEl = null;
+      this.hostWasPinned = false;
       this.build();
     }
 
@@ -142,18 +144,7 @@
       this.statusEl.className = "bala-meta";
       this.statusEl.textContent = "";
 
-      this.guideEl = document.createElement("div");
-      this.guideEl.className = "bala-guide";
-      this.guideEl.setAttribute("aria-live", "polite");
-
-      frame.append(
-        header,
-        controls,
-        slider,
-        this.voiceSelect,
-        this.statusEl,
-        this.guideEl,
-      );
+      frame.append(header, controls, slider, this.voiceSelect, this.statusEl);
       container.append(style, frame);
       this.shadowRoot.appendChild(container);
       this.renderTrackState();
@@ -287,6 +278,10 @@
       if (this.isSpeaking) {
         this.handleStop();
       }
+      this.preparePageTracking();
+      this.pageTrackIndex = 0;
+      this.pageTrackNodeOffset = 0;
+      this.setPinnedForReading(true);
       this.chunkIndex = 0;
       this.speakNext();
       this.sendEvent("play", 0);
@@ -315,9 +310,8 @@
       speechSynthesis.cancel();
       this.isSpeaking = false;
       this.chunkIndex = 0;
-      this.currentChunkText = "";
-      this.renderGuideText();
       this.clearPageHighlight();
+      this.setPinnedForReading(false);
       this.sendEvent("stop", 0);
       this.setStatus("Stopped");
     }
@@ -326,12 +320,12 @@
       if (!this.article || this.chunkIndex >= this.chunks.length) {
         this.isSpeaking = false;
         this.sendEvent("ended", this.currentPosition());
+        this.clearPageHighlight();
+        this.setPinnedForReading(false);
         this.setStatus("Finished");
         return;
       }
       const chunk = this.chunks[this.chunkIndex];
-      this.currentChunkText = chunk;
-      this.renderGuideText(0);
       const utterance = new SpeechSynthesisUtterance(chunk);
       utterance.rate = this.rate;
       utterance.lang = this.lang || this.article.language || undefined;
@@ -341,7 +335,6 @@
       utterance.onboundary = (event) => {
         if (event.name === "word") {
           const index = event.charIndex || 0;
-          this.renderGuideText(index);
           this.highlightWordOnPage(this.getWordAtIndex(chunk, index));
         }
       };
@@ -353,6 +346,8 @@
 
       utterance.onerror = () => {
         this.isSpeaking = false;
+        this.clearPageHighlight();
+        this.setPinnedForReading(false);
         this.sendEvent("stop", this.currentPosition());
         this.setStatus("Error during playback");
       };
@@ -394,55 +389,16 @@
     toggleTrack() {
       this.trackEnabled = !this.trackEnabled;
       this.renderTrackState();
-      this.renderGuideText();
       if (!this.trackEnabled) {
         this.clearPageHighlight();
       }
     }
 
     renderTrackState() {
-      if (!this.trackBtn || !this.guideEl) return;
+      if (!this.trackBtn) return;
       this.trackBtn.textContent = this.trackEnabled
         ? "Track: On"
         : "Track: Off";
-      this.guideEl.classList.toggle("active", this.trackEnabled);
-    }
-
-    renderGuideText(charIndex = null) {
-      if (!this.guideEl) return;
-      if (!this.trackEnabled) {
-        this.guideEl.innerHTML = "";
-        return;
-      }
-
-      const text = this.currentChunkText || "";
-      if (!text) {
-        this.guideEl.textContent =
-          "Tracking is on. Press Play to follow spoken words.";
-        return;
-      }
-
-      if (charIndex === null || charIndex < 0 || charIndex >= text.length) {
-        this.guideEl.textContent = text;
-        return;
-      }
-
-      const left = text.slice(0, charIndex);
-      const remainder = text.slice(charIndex);
-      const match = remainder.match(/^\S+/);
-      if (!match) {
-        this.guideEl.textContent = text;
-        return;
-      }
-
-      const word = match[0];
-      const right = remainder.slice(word.length);
-      this.guideEl.innerHTML = `${this.escapeHtml(left)}<mark>${this.escapeHtml(word)}</mark>${this.escapeHtml(right)}`;
-
-      const mark = this.guideEl.querySelector("mark");
-      if (mark) {
-        mark.scrollIntoView({ block: "center", behavior: "smooth" });
-      }
     }
 
     preparePageTracking() {
@@ -484,6 +440,7 @@
 
       this.pageTrackNodes = nodes;
       this.pageTrackIndex = 0;
+      this.pageTrackNodeOffset = 0;
     }
 
     ensurePageHighlightStyle() {
@@ -491,6 +448,11 @@
       const style = document.createElement("style");
       style.id = "bala-page-highlight-style";
       style.textContent = `
+        ::highlight(bala-current-word) {
+          background: #fde68a;
+          color: inherit;
+          border-radius: 3px;
+        }
         .bala-page-highlight {
           background: #fde68a !important;
           color: inherit !important;
@@ -526,20 +488,37 @@
       while (checked < maxChecks) {
         const node = this.pageTrackNodes[index];
         const text = node?.textContent || "";
-        const lower = text.toLowerCase();
-        const foundAt = lower.indexOf(target);
+        const startAt =
+          index === this.pageTrackIndex ? this.pageTrackNodeOffset : 0;
+        const tokenMatch = this.findTokenMatch(text, target, startAt);
 
-        if (foundAt >= 0) {
+        if (tokenMatch) {
           try {
             const range = document.createRange();
-            range.setStart(node, foundAt);
-            range.setEnd(node, foundAt + target.length);
-            const span = document.createElement("span");
-            span.className = "bala-page-highlight";
-            range.surroundContents(span);
-            this.pageTrackActiveEl = span;
+            range.setStart(node, tokenMatch.start);
+            range.setEnd(node, tokenMatch.end);
+
+            if (this.supportsCssHighlights) {
+              const highlight = new Highlight(range);
+              CSS.highlights.set(this.pageTrackName, highlight);
+              this.pageTrackActiveEl = null;
+            } else {
+              const span = document.createElement("span");
+              span.className = "bala-page-highlight";
+              range.surroundContents(span);
+              this.pageTrackActiveEl = span;
+            }
+
             this.pageTrackIndex = index;
-            span.scrollIntoView({ block: "center", behavior: "smooth" });
+            this.pageTrackNodeOffset = tokenMatch.end;
+
+            const scrollTarget = node.parentElement;
+            if (scrollTarget) {
+              scrollTarget.scrollIntoView({
+                block: "center",
+                behavior: "smooth",
+              });
+            }
             return;
           } catch {
             // Continue searching if this node cannot be wrapped safely.
@@ -552,6 +531,10 @@
     }
 
     clearPageHighlight() {
+      if (this.supportsCssHighlights) {
+        CSS.highlights.delete(this.pageTrackName);
+      }
+
       const el = this.pageTrackActiveEl;
       if (!el || !el.parentNode) {
         this.pageTrackActiveEl = null;
@@ -565,13 +548,46 @@
       this.pageTrackActiveEl = null;
     }
 
-    escapeHtml(input) {
-      return input
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/\"/g, "&quot;")
-        .replace(/'/g, "&#39;");
+    findTokenMatch(text, normalizedTarget, startAt) {
+      if (!text || startAt >= text.length) return null;
+      const tokenRegex = /\S+/g;
+      tokenRegex.lastIndex = startAt;
+
+      let match;
+      while ((match = tokenRegex.exec(text)) !== null) {
+        const raw = match[0];
+        const normalized = raw.replace(/[\W_]+/g, "").toLowerCase();
+        if (normalized === normalizedTarget) {
+          return {
+            start: match.index,
+            end: match.index + raw.length,
+          };
+        }
+      }
+
+      return null;
+    }
+
+    setPinnedForReading(enabled) {
+      if (this.position !== "inline") return;
+
+      if (enabled) {
+        if (this.hostWasPinned) return;
+        this.hostWasPinned = true;
+        this.style.position = "fixed";
+        this.style.bottom = "16px";
+        this.style.right = "16px";
+        this.style.left = "";
+        this.style.zIndex = "2147483000";
+      } else {
+        if (!this.hostWasPinned) return;
+        this.hostWasPinned = false;
+        this.style.position = "";
+        this.style.bottom = "";
+        this.style.right = "";
+        this.style.left = "";
+        this.style.zIndex = "";
+      }
     }
 
     async sendEvent(eventType, positionSeconds) {
