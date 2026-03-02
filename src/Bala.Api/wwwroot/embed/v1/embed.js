@@ -281,7 +281,6 @@
       this.preparePageTracking();
       this.pageTrackIndex = 0;
       this.pageTrackNodeOffset = 0;
-      this.setPinnedForReading(true);
       this.chunkIndex = 0;
       this.speakNext();
       this.sendEvent("play", 0);
@@ -311,7 +310,6 @@
       this.isSpeaking = false;
       this.chunkIndex = 0;
       this.clearPageHighlight();
-      this.setPinnedForReading(false);
       this.sendEvent("stop", 0);
       this.setStatus("Stopped");
     }
@@ -321,7 +319,6 @@
         this.isSpeaking = false;
         this.sendEvent("ended", this.currentPosition());
         this.clearPageHighlight();
-        this.setPinnedForReading(false);
         this.setStatus("Finished");
         return;
       }
@@ -345,7 +342,6 @@
       utterance.onerror = () => {
         this.isSpeaking = false;
         this.clearPageHighlight();
-        this.setPinnedForReading(false);
         this.sendEvent("stop", this.currentPosition());
         this.setStatus("Error during playback");
       };
@@ -495,29 +491,37 @@
     highlightWordOnPage(word) {
       if (!this.trackEnabled) return;
       const target = (word || "").replace(/[\W_]+/g, "").toLowerCase();
-      if (!target || target.length < 2) return;
 
-      this.clearPageHighlight();
+      if (!target || target.length < 2) {
+        return;
+      }
+
       if (!this.pageTrackNodes.length) {
         this.preparePageTracking();
       }
 
-      const maxChecks = this.pageTrackNodes.length;
-      let checked = 0;
-      let index = this.pageTrackIndex;
-
-      while (checked < maxChecks) {
+      for (
+        let index = this.pageTrackIndex;
+        index < this.pageTrackNodes.length;
+        index += 1
+      ) {
         const node = this.pageTrackNodes[index];
         const text = node?.textContent || "";
         const startAt =
           index === this.pageTrackIndex ? this.pageTrackNodeOffset : 0;
-        const tokenMatch = this.findTokenMatch(text, target, startAt);
+        let tokenMatch = this.findTokenMatch(text, target, startAt);
+
+        if (!tokenMatch) {
+          tokenMatch = this.findNextToken(text, startAt);
+        }
 
         if (tokenMatch) {
           try {
             const range = document.createRange();
             range.setStart(node, tokenMatch.start);
             range.setEnd(node, tokenMatch.end);
+
+            this.clearPageHighlight();
 
             if (this.supportsCssHighlights) {
               const highlight = new Highlight(range);
@@ -532,22 +536,11 @@
 
             this.pageTrackIndex = index;
             this.pageTrackNodeOffset = tokenMatch.end;
-
-            const scrollTarget = node.parentElement;
-            if (scrollTarget) {
-              scrollTarget.scrollIntoView({
-                block: "center",
-                behavior: "smooth",
-              });
-            }
             return;
           } catch {
             // Continue searching if this node cannot be wrapped safely.
           }
         }
-
-        checked += 1;
-        index = (index + 1) % this.pageTrackNodes.length;
       }
     }
 
@@ -589,30 +582,20 @@
       return null;
     }
 
-    setPinnedForReading(enabled) {
-      if (this.position !== "inline") return;
+    findNextToken(text, startAt) {
+      if (!text || startAt >= text.length) return null;
+      const tokenRegex = /\S+/g;
+      tokenRegex.lastIndex = startAt;
+      const match = tokenRegex.exec(text);
+      if (!match) return null;
+      return {
+        start: match.index,
+        end: match.index + match[0].length,
+      };
+    }
 
-      if (enabled) {
-        if (this.hostWasPinned) return;
-        this.hostWasPinned = true;
-        this.style.display = "block";
-        this.style.position = "sticky";
-        this.style.top = "16px";
-        this.style.bottom = "";
-        this.style.right = "";
-        this.style.left = "";
-        this.style.zIndex = "100";
-      } else {
-        if (!this.hostWasPinned) return;
-        this.hostWasPinned = false;
-        this.style.display = "";
-        this.style.position = "";
-        this.style.top = "";
-        this.style.bottom = "";
-        this.style.right = "";
-        this.style.left = "";
-        this.style.zIndex = "";
-      }
+    setPinnedForReading(enabled) {
+      this.hostWasPinned = enabled;
     }
 
     async sendEvent(eventType, positionSeconds) {
