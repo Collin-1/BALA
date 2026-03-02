@@ -38,6 +38,7 @@
       this.apiBase = this.getAttribute("api-base") || window.location.origin;
       this.url = this.getAttribute("url");
       this.position = this.getAttribute("position") || "inline";
+      this.source = (this.getAttribute("source") || "api").toLowerCase();
       this.trackEnabled = this.getAttribute("track") === "true";
       this.pageTrackNodes = [];
       this.pageTrackIndex = 0;
@@ -173,6 +174,7 @@
         if (!payload.success)
           throw new Error(payload.error?.message || "Failed to load article");
         this.article = payload.data;
+        this.applyPreferredSpeechSource();
         this.titleEl.textContent = this.article.title || "Untitled";
         this.setStatus(
           `${this.article.wordCount} words · ~${this.article.estimatedMinutes} min`,
@@ -185,6 +187,80 @@
         this.loading = false;
         this.toggleControls(false);
       }
+    }
+
+    applyPreferredSpeechSource() {
+      if (!this.article) return;
+
+      const shouldUseDomSource = this.source === "dom" || this.trackEnabled;
+      if (!shouldUseDomSource) return;
+
+      const domContent = this.extractReadableFromPage();
+      if (!domContent.cleanText || domContent.cleanText.length < 120) return;
+
+      this.article.cleanText = domContent.cleanText;
+      if (domContent.title) {
+        this.article.title = domContent.title;
+      }
+
+      const words = this.countWords(domContent.cleanText);
+      this.article.wordCount = words;
+      this.article.estimatedMinutes = Math.max(
+        1,
+        Math.round((words / 180) * 10) / 10,
+      );
+    }
+
+    extractReadableFromPage() {
+      const root =
+        document.querySelector("article") ||
+        document.querySelector("main") ||
+        document.body;
+
+      const clone = root.cloneNode(true);
+      const noiseSelectors = [
+        "script",
+        "style",
+        "noscript",
+        "iframe",
+        "nav",
+        "footer",
+        "header",
+        "aside",
+        ".ad",
+        ".ads",
+        ".ad-banner",
+        ".ad-small",
+        ".advertisement",
+        ".sponsored",
+        ".sponsor",
+        ".promo",
+        "[id*=ad]",
+        "[class*=ad-]",
+        "[class*=advert]",
+        "[class*=sponsor]",
+      ];
+      clone
+        .querySelectorAll(noiseSelectors.join(","))
+        .forEach((el) => el.remove());
+
+      const title =
+        (clone.querySelector("h1")?.textContent || "").trim() ||
+        (document.querySelector("h1")?.textContent || "").trim() ||
+        "";
+
+      const blocks = Array.from(
+        clone.querySelectorAll("h1,h2,h3,p,li,blockquote"),
+      )
+        .map((el) => (el.textContent || "").replace(/\s+/g, " ").trim())
+        .filter(Boolean);
+
+      const cleanText = blocks.join("\n\n").trim();
+      return { title, cleanText };
+    }
+
+    countWords(text) {
+      return (text.match(/\b\w+\b/g) || []).length;
     }
 
     prepareChunks() {
@@ -411,6 +487,7 @@
           const parent = node.parentElement;
           if (!parent) return NodeFilter.FILTER_REJECT;
           if (parent.closest("bala-reader")) return NodeFilter.FILTER_REJECT;
+          if (this.isLikelyAdElement(parent)) return NodeFilter.FILTER_REJECT;
 
           const tag = parent.tagName.toLowerCase();
           const blocked = [
@@ -435,6 +512,31 @@
       this.pageTrackNodes = nodes;
       this.pageTrackIndex = 0;
       this.pageTrackNodeOffset = 0;
+    }
+
+    isLikelyAdElement(element) {
+      const noisyFragments = [
+        "ad",
+        "ads",
+        "advert",
+        "sponsor",
+        "promo",
+        "banner",
+        "sponsored",
+      ];
+
+      let current = element;
+      while (current && current !== document.body) {
+        const cls = (current.className || "").toString().toLowerCase();
+        const id = (current.id || "").toLowerCase();
+        const attrs = `${cls} ${id}`;
+        if (noisyFragments.some((frag) => attrs.includes(frag))) {
+          return true;
+        }
+        current = current.parentElement;
+      }
+
+      return false;
     }
 
     ensurePageHighlightStyle() {
