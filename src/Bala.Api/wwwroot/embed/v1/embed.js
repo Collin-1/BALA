@@ -45,6 +45,9 @@
       this.position = this.getAttribute("position") || "inline";
       this.trackEnabled = this.getAttribute("track") === "true";
       this.currentChunkText = "";
+      this.pageTrackNodes = [];
+      this.pageTrackIndex = 0;
+      this.pageTrackActiveEl = null;
       this.build();
     }
 
@@ -58,10 +61,12 @@
         return;
       }
       this.setStatus("Ready. Click play to fetch.");
+      this.preparePageTracking();
     }
 
     disconnectedCallback() {
       speechSynthesis.cancel();
+      this.clearPageHighlight();
     }
 
     build() {
@@ -312,6 +317,7 @@
       this.chunkIndex = 0;
       this.currentChunkText = "";
       this.renderGuideText();
+      this.clearPageHighlight();
       this.sendEvent("stop", 0);
       this.setStatus("Stopped");
     }
@@ -334,7 +340,9 @@
 
       utterance.onboundary = (event) => {
         if (event.name === "word") {
-          this.renderGuideText(event.charIndex || 0);
+          const index = event.charIndex || 0;
+          this.renderGuideText(index);
+          this.highlightWordOnPage(this.getWordAtIndex(chunk, index));
         }
       };
 
@@ -351,6 +359,7 @@
 
       this.isSpeaking = true;
       speechSynthesis.speak(utterance);
+      this.highlightWordOnPage(this.getWordAtIndex(chunk, 0));
       this.setStatus(
         `Playing chunk ${this.chunkIndex + 1}/${this.chunks.length}`,
       );
@@ -386,6 +395,9 @@
       this.trackEnabled = !this.trackEnabled;
       this.renderTrackState();
       this.renderGuideText();
+      if (!this.trackEnabled) {
+        this.clearPageHighlight();
+      }
     }
 
     renderTrackState() {
@@ -431,6 +443,126 @@
       if (mark) {
         mark.scrollIntoView({ block: "center", behavior: "smooth" });
       }
+    }
+
+    preparePageTracking() {
+      this.ensurePageHighlightStyle();
+      const root =
+        document.querySelector("article") ||
+        document.querySelector("main") ||
+        document.body;
+
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode: (node) => {
+          if (!node.textContent || !node.textContent.trim()) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          const parent = node.parentElement;
+          if (!parent) return NodeFilter.FILTER_REJECT;
+          if (parent.closest("bala-reader")) return NodeFilter.FILTER_REJECT;
+
+          const tag = parent.tagName.toLowerCase();
+          const blocked = [
+            "script",
+            "style",
+            "noscript",
+            "button",
+            "input",
+            "textarea",
+          ];
+          if (blocked.includes(tag)) return NodeFilter.FILTER_REJECT;
+
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      });
+
+      const nodes = [];
+      while (walker.nextNode()) {
+        nodes.push(walker.currentNode);
+      }
+
+      this.pageTrackNodes = nodes;
+      this.pageTrackIndex = 0;
+    }
+
+    ensurePageHighlightStyle() {
+      if (document.getElementById("bala-page-highlight-style")) return;
+      const style = document.createElement("style");
+      style.id = "bala-page-highlight-style";
+      style.textContent = `
+        .bala-page-highlight {
+          background: #fde68a !important;
+          color: inherit !important;
+          border-radius: 3px;
+          padding: 0 2px;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    getWordAtIndex(text, charIndex) {
+      if (!text) return "";
+      if (charIndex < 0 || charIndex >= text.length) return "";
+      const remainder = text.slice(charIndex);
+      const match = remainder.match(/^\S+/);
+      return match ? match[0] : "";
+    }
+
+    highlightWordOnPage(word) {
+      if (!this.trackEnabled) return;
+      const target = (word || "").replace(/[\W_]+/g, "").toLowerCase();
+      if (!target || target.length < 2) return;
+
+      this.clearPageHighlight();
+      if (!this.pageTrackNodes.length) {
+        this.preparePageTracking();
+      }
+
+      const maxChecks = this.pageTrackNodes.length;
+      let checked = 0;
+      let index = this.pageTrackIndex;
+
+      while (checked < maxChecks) {
+        const node = this.pageTrackNodes[index];
+        const text = node?.textContent || "";
+        const lower = text.toLowerCase();
+        const foundAt = lower.indexOf(target);
+
+        if (foundAt >= 0) {
+          try {
+            const range = document.createRange();
+            range.setStart(node, foundAt);
+            range.setEnd(node, foundAt + target.length);
+            const span = document.createElement("span");
+            span.className = "bala-page-highlight";
+            range.surroundContents(span);
+            this.pageTrackActiveEl = span;
+            this.pageTrackIndex = index;
+            span.scrollIntoView({ block: "center", behavior: "smooth" });
+            return;
+          } catch {
+            // Continue searching if this node cannot be wrapped safely.
+          }
+        }
+
+        checked += 1;
+        index = (index + 1) % this.pageTrackNodes.length;
+      }
+    }
+
+    clearPageHighlight() {
+      const el = this.pageTrackActiveEl;
+      if (!el || !el.parentNode) {
+        this.pageTrackActiveEl = null;
+        return;
+      }
+
+      const textNode = document.createTextNode(el.textContent || "");
+      const parent = el.parentNode;
+      parent.replaceChild(textNode, el);
+      if (parent.normalize) parent.normalize();
+      this.pageTrackActiveEl = null;
     }
 
     escapeHtml(input) {
