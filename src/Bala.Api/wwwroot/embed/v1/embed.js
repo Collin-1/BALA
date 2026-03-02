@@ -172,7 +172,17 @@
 
     prepareChunks() {
       if (!this.article) return;
-      const text = this.article.cleanText;
+      const title = this.resolveSpeechTitle();
+      const body = (this.article.cleanText || "").trim();
+      const normalizedTitle = title.replace(/\s+/g, " ").toLowerCase();
+      const normalizedBodyStart = body
+        .slice(0, Math.min(body.length, 300))
+        .replace(/\s+/g, " ")
+        .toLowerCase();
+      const includesTitleAlready =
+        normalizedTitle && normalizedBodyStart.includes(normalizedTitle);
+      const text =
+        title && !includesTitleAlready ? `${title}.\n\n${body}` : body;
       const max = 2800;
       const min = 1500;
       const parts = [];
@@ -188,6 +198,29 @@
       }
       this.chunks = parts;
       this.chunkIndex = 0;
+    }
+
+    resolveSpeechTitle() {
+      const fromArticle = (this.article?.title || "").trim();
+      if (fromArticle) return fromArticle;
+
+      try {
+        const parsed = new URL(
+          this.url || window.location.href,
+          window.location.href,
+        );
+        const raw =
+          parsed.pathname.split("/").filter(Boolean).pop() || parsed.hostname;
+        const withoutExt = raw.replace(/\.[a-z0-9]+$/i, "");
+        const normalized = withoutExt
+          .replace(/[-_]+/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (!normalized) return "Untitled article";
+        return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+      } catch {
+        return "Untitled article";
+      }
     }
 
     async loadVoices() {
