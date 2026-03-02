@@ -10,6 +10,9 @@
     button:hover { background: #eef2ff; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .bala-meta { display: flex; justify-content: space-between; color: #475569; font-size: 12px; margin-top: 8px; }
+    .bala-guide { margin-top: 8px; padding: 8px; border: 1px solid #d0d7de; border-radius: 8px; background: #f8fafc; color: #334155; font-size: 12px; line-height: 1.5; max-height: 120px; overflow: auto; display: none; }
+    .bala-guide.active { display: block; }
+    .bala-guide mark { background: #fde68a; color: #111827; padding: 0 2px; border-radius: 3px; }
     .bala-slider { width: 100%; }
     .bala-select { width: 100%; padding: 6px; border-radius: 8px; border: 1px solid #d0d7de; background: #fff; color: #0f172a; }
     .dark .bala-frame { background: #0f172a; color: #e2e8f0; border-color: #1e293b; box-shadow: 0 6px 18px rgba(0,0,0,0.4); }
@@ -18,6 +21,8 @@
     .dark .bala-badge { background: #6366f1; }
     .dark .bala-title { color: #e2e8f0; }
     .dark .bala-meta { color: #cbd5e1; }
+    .dark .bala-guide { background: #1e293b; color: #e2e8f0; border-color: #334155; }
+    .dark .bala-guide mark { background: #818cf8; color: #0f172a; }
   `;
 
   class BalaReader extends HTMLElement {
@@ -38,6 +43,8 @@
       this.apiBase = this.getAttribute("api-base") || window.location.origin;
       this.url = this.getAttribute("url");
       this.position = this.getAttribute("position") || "inline";
+      this.trackEnabled = this.getAttribute("track") === "true";
+      this.currentChunkText = "";
       this.build();
     }
 
@@ -97,11 +104,13 @@
       this.pauseBtn = this.makeButton("Pause", () => this.handlePause());
       this.resumeBtn = this.makeButton("Resume", () => this.handleResume());
       this.stopBtn = this.makeButton("Stop", () => this.handleStop());
+      this.trackBtn = this.makeButton("Track: Off", () => this.toggleTrack());
       controls.append(
         this.playBtn,
         this.pauseBtn,
         this.resumeBtn,
         this.stopBtn,
+        this.trackBtn,
       );
 
       const slider = document.createElement("input");
@@ -128,9 +137,21 @@
       this.statusEl.className = "bala-meta";
       this.statusEl.textContent = "";
 
-      frame.append(header, controls, slider, this.voiceSelect, this.statusEl);
+      this.guideEl = document.createElement("div");
+      this.guideEl.className = "bala-guide";
+      this.guideEl.setAttribute("aria-live", "polite");
+
+      frame.append(
+        header,
+        controls,
+        slider,
+        this.voiceSelect,
+        this.statusEl,
+        this.guideEl,
+      );
       container.append(style, frame);
       this.shadowRoot.appendChild(container);
+      this.renderTrackState();
     }
 
     makeButton(label, handler) {
@@ -172,7 +193,17 @@
 
     prepareChunks() {
       if (!this.article) return;
-      const text = this.article.cleanText;
+      const title = this.resolveSpeechTitle();
+      const body = (this.article.cleanText || "").trim();
+      const normalizedTitle = title.replace(/\s+/g, " ").toLowerCase();
+      const normalizedBodyStart = body
+        .slice(0, Math.min(body.length, 300))
+        .replace(/\s+/g, " ")
+        .toLowerCase();
+      const includesTitleAlready =
+        normalizedTitle && normalizedBodyStart.includes(normalizedTitle);
+      const text =
+        title && !includesTitleAlready ? `${title}.\n\n${body}` : body;
       const max = 2800;
       const min = 1500;
       const parts = [];
@@ -188,6 +219,29 @@
       }
       this.chunks = parts;
       this.chunkIndex = 0;
+    }
+
+    resolveSpeechTitle() {
+      const fromArticle = (this.article?.title || "").trim();
+      if (fromArticle) return fromArticle;
+
+      try {
+        const parsed = new URL(
+          this.url || window.location.href,
+          window.location.href,
+        );
+        const raw =
+          parsed.pathname.split("/").filter(Boolean).pop() || parsed.hostname;
+        const withoutExt = raw.replace(/\.[a-z0-9]+$/i, "");
+        const normalized = withoutExt
+          .replace(/[-_]+/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (!normalized) return "Untitled article";
+        return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+      } catch {
+        return "Untitled article";
+      }
     }
 
     async loadVoices() {
@@ -256,6 +310,8 @@
       speechSynthesis.cancel();
       this.isSpeaking = false;
       this.chunkIndex = 0;
+      this.currentChunkText = "";
+      this.renderGuideText();
       this.sendEvent("stop", 0);
       this.setStatus("Stopped");
     }
@@ -268,11 +324,19 @@
         return;
       }
       const chunk = this.chunks[this.chunkIndex];
+      this.currentChunkText = chunk;
+      this.renderGuideText(0);
       const utterance = new SpeechSynthesisUtterance(chunk);
       utterance.rate = this.rate;
       utterance.lang = this.lang || this.article.language || undefined;
       const voice = this.selectVoice();
       if (voice) utterance.voice = voice;
+
+      utterance.onboundary = (event) => {
+        if (event.name === "word") {
+          this.renderGuideText(event.charIndex || 0);
+        }
+      };
 
       utterance.onend = () => {
         this.chunkIndex += 1;
@@ -311,10 +375,71 @@
         this.pauseBtn,
         this.resumeBtn,
         this.stopBtn,
+        this.trackBtn,
         this.voiceSelect,
       ].forEach((el) => {
         el.disabled = disabled;
       });
+    }
+
+    toggleTrack() {
+      this.trackEnabled = !this.trackEnabled;
+      this.renderTrackState();
+      this.renderGuideText();
+    }
+
+    renderTrackState() {
+      if (!this.trackBtn || !this.guideEl) return;
+      this.trackBtn.textContent = this.trackEnabled
+        ? "Track: On"
+        : "Track: Off";
+      this.guideEl.classList.toggle("active", this.trackEnabled);
+    }
+
+    renderGuideText(charIndex = null) {
+      if (!this.guideEl) return;
+      if (!this.trackEnabled) {
+        this.guideEl.innerHTML = "";
+        return;
+      }
+
+      const text = this.currentChunkText || "";
+      if (!text) {
+        this.guideEl.textContent =
+          "Tracking is on. Press Play to follow spoken words.";
+        return;
+      }
+
+      if (charIndex === null || charIndex < 0 || charIndex >= text.length) {
+        this.guideEl.textContent = text;
+        return;
+      }
+
+      const left = text.slice(0, charIndex);
+      const remainder = text.slice(charIndex);
+      const match = remainder.match(/^\S+/);
+      if (!match) {
+        this.guideEl.textContent = text;
+        return;
+      }
+
+      const word = match[0];
+      const right = remainder.slice(word.length);
+      this.guideEl.innerHTML = `${this.escapeHtml(left)}<mark>${this.escapeHtml(word)}</mark>${this.escapeHtml(right)}`;
+
+      const mark = this.guideEl.querySelector("mark");
+      if (mark) {
+        mark.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+    }
+
+    escapeHtml(input) {
+      return input
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     }
 
     async sendEvent(eventType, positionSeconds) {

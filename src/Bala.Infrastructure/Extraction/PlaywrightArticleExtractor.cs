@@ -35,9 +35,49 @@ public class PlaywrightArticleExtractor : IArticleExtractor, IAsyncDisposable
         var language = _converter.DetectLanguage(cleanText);
         var (wordCount, estimatedMinutes) = _converter.CalculateReadingStats(cleanText);
         var hash = _converter.ComputeHash(cleanText);
-        var title = await page.TitleAsync();
+        var title = await ExtractBestTitleAsync(page, url);
 
         return new ExtractedArticle(url, title, cleanText, language, wordCount, estimatedMinutes, hash);
+    }
+
+    private static async Task<string?> ExtractBestTitleAsync(IPage page, string url)
+    {
+        const string script = @"() => {
+            const pick = (selector, attr) => {
+                const node = document.querySelector(selector);
+                if (!node) return null;
+                if (!attr) return (node.textContent || '').trim();
+                return (node.getAttribute(attr) || '').trim();
+            };
+
+            const candidates = [
+                pick('meta[property=""og:title""]', 'content'),
+                pick('meta[name=""twitter:title""]', 'content'),
+                pick('article h1', null),
+                pick('main h1', null),
+                pick('h1', null),
+                (document.title || '').trim()
+            ].filter(Boolean);
+
+            return candidates.length ? candidates[0] : null;
+        }";
+
+        var title = await page.EvaluateAsync<string?>(script);
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            return title.Trim();
+        }
+
+        var uri = new Uri(url);
+        var segment = uri.Segments.LastOrDefault()?.Trim('/');
+        if (string.IsNullOrWhiteSpace(segment)) return uri.Host;
+        segment = segment.Replace("-", " ", StringComparison.Ordinal).Replace("_", " ", StringComparison.Ordinal);
+        if (segment.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+        {
+            segment = segment[..^5];
+        }
+
+        return string.IsNullOrWhiteSpace(segment) ? uri.Host : char.ToUpperInvariant(segment[0]) + segment[1..];
     }
 
     private static async Task<string> ExtractMainContentHtmlAsync(IPage page)
