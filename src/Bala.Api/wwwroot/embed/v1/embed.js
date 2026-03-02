@@ -333,10 +333,8 @@
       if (voice) utterance.voice = voice;
 
       utterance.onboundary = (event) => {
-        if (event.name === "word") {
-          const index = event.charIndex || 0;
-          this.highlightWordOnPage(this.getWordAtIndex(chunk, index));
-        }
+        const index = Number.isFinite(event.charIndex) ? event.charIndex : 0;
+        this.highlightWordOnPage(this.getWordAtIndex(chunk, index));
       };
 
       utterance.onend = () => {
@@ -465,10 +463,33 @@
 
     getWordAtIndex(text, charIndex) {
       if (!text) return "";
-      if (charIndex < 0 || charIndex >= text.length) return "";
-      const remainder = text.slice(charIndex);
-      const match = remainder.match(/^\S+/);
-      return match ? match[0] : "";
+      if (charIndex < 0) charIndex = 0;
+      if (charIndex >= text.length) charIndex = text.length - 1;
+
+      let index = charIndex;
+      if (!this.isWordChar(text[index])) {
+        let right = index;
+        while (right < text.length && !this.isWordChar(text[right])) right += 1;
+        if (right < text.length) {
+          index = right;
+        } else {
+          let left = index;
+          while (left >= 0 && !this.isWordChar(text[left])) left -= 1;
+          if (left < 0) return "";
+          index = left;
+        }
+      }
+
+      let start = index;
+      while (start > 0 && this.isWordChar(text[start - 1])) start -= 1;
+      let end = index;
+      while (end < text.length && this.isWordChar(text[end])) end += 1;
+
+      return text.slice(start, end);
+    }
+
+    isWordChar(char) {
+      return !!char && /[\p{L}\p{N}']/u.test(char);
     }
 
     highlightWordOnPage(word) {
@@ -574,15 +595,19 @@
       if (enabled) {
         if (this.hostWasPinned) return;
         this.hostWasPinned = true;
-        this.style.position = "fixed";
-        this.style.bottom = "16px";
-        this.style.right = "16px";
+        this.style.display = "block";
+        this.style.position = "sticky";
+        this.style.top = "16px";
+        this.style.bottom = "";
+        this.style.right = "";
         this.style.left = "";
-        this.style.zIndex = "2147483000";
+        this.style.zIndex = "100";
       } else {
         if (!this.hostWasPinned) return;
         this.hostWasPinned = false;
+        this.style.display = "";
         this.style.position = "";
+        this.style.top = "";
         this.style.bottom = "";
         this.style.right = "";
         this.style.left = "";
