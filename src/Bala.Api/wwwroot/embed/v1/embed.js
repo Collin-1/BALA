@@ -1,4 +1,30 @@
 (() => {
+  const resolveEmbedScript = () =>
+    document.currentScript ||
+    Array.from(document.scripts)
+      .reverse()
+      .find(
+        (script) =>
+          script.src &&
+          (script.src.endsWith("/embed/v1/embed.js") ||
+            script.src.includes("/embed/v1/embed.js")),
+      );
+
+  const resolveDefaultApiBase = () => {
+    const script = resolveEmbedScript();
+    if (script?.src) {
+      try {
+        return new URL(script.src, window.location.href).origin;
+      } catch {
+        return window.location.origin;
+      }
+    }
+
+    return window.location.origin;
+  };
+
+  const DEFAULT_API_BASE = resolveDefaultApiBase();
+
   const STYLE = `
     :host { font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif; display: inline-block; }
     .bala-frame { border: 1px solid #d0d7de; border-radius: 10px; padding: 12px; background: #ffffff; box-shadow: 0 6px 18px rgba(0,0,0,0.06); width: 320px; }
@@ -35,11 +61,12 @@
       this.lang = this.getAttribute("lang") || undefined;
       this.theme = this.getAttribute("theme") || "light";
       this.refresh = this.getAttribute("refresh") === "true";
-      this.apiBase = this.getAttribute("api-base") || window.location.origin;
-      this.url = this.getAttribute("url");
+      this.apiBase = this.getAttribute("api-base") || DEFAULT_API_BASE;
+      this.url = this.getAttribute("url") || window.location.href;
       this.position = this.getAttribute("position") || "inline";
       this.source = (this.getAttribute("source") || "api").toLowerCase();
       this.trackEnabled = this.getAttribute("track") === "true";
+      this.showDebug = this.getAttribute("show-debug") === "true";
       this.pageTrackNodes = [];
       this.pageTrackIndex = 0;
       this.pageTrackNodeOffset = 0;
@@ -51,25 +78,42 @@
         !!window.CSS.highlights;
       this.pageTrackActiveEl = null;
       this.hostWasPinned = false;
+      this.lastBoundaryHighlightAt = 0;
+      this.trackingRetryTimers = [];
+      this.speechSynthesisAvailable = "speechSynthesis" in window;
       this.build();
     }
 
     connectedCallback() {
-      if (!("speechSynthesis" in window)) {
-        this.setStatus("Speech synthesis not supported in this browser.");
-        return;
+      if (this.showDebug) {
+        console.log("Bala embed loaded");
+        console.log("resolved apiBase", this.apiBase);
+        console.log("resolved url", this.url);
+        console.log("speechSynthesis available", this.speechSynthesisAvailable);
       }
+
+      if (!this.speechSynthesisAvailable) {
+        this.setStatus("Speech synthesis not supported in this browser.");
+      }
+
       if (!this.url) {
         this.setStatus("Missing url attribute.");
-        return;
       }
-      this.setStatus("Ready. Click play to fetch.");
+
+      if (this.speechSynthesisAvailable && this.url) {
+        this.setStatus("Ready. Click play to fetch.");
+      }
+
       this.preparePageTracking();
+      if (!this.pageTrackNodes.length) {
+        this.scheduleTrackingRetry();
+      }
     }
 
     disconnectedCallback() {
       speechSynthesis.cancel();
       this.clearPageHighlight();
+      this.clearTrackingRetry();
     }
 
     build() {
@@ -169,6 +213,9 @@
       this.setStatus("Fetching article...");
       try {
         const endpoint = `${this.apiBase}/v1/articles/by-url?url=${encodeURIComponent(this.url)}&refresh=${this.refresh}`;
+        if (this.showDebug) {
+          console.log("fetch endpoint", endpoint);
+        }
         const resp = await fetch(endpoint);
         const payload = await resp.json();
         if (!payload.success)
@@ -181,7 +228,16 @@
         );
         this.prepareChunks();
         await this.loadVoices();
+        if (this.showDebug) {
+          console.log("fetch success", {
+            articleId: this.article.articleId,
+            wordCount: this.article.wordCount,
+          });
+        }
       } catch (err) {
+        if (this.showDebug) {
+          console.log("fetch failure", err);
+        }
         this.setStatus(`Error: ${err.message}`);
       } finally {
         this.loading = false;
@@ -347,6 +403,12 @@
         this.setStatus("Still fetching...");
         return;
       }
+
+      if (!this.speechSynthesisAvailable) {
+        this.setStatus("Speech synthesis not supported in this browser.");
+        return;
+      }
+
       if (!this.article) {
         await this.fetchArticle();
         if (!this.article) return;
@@ -354,9 +416,14 @@
       if (this.isSpeaking) {
         this.handleStop();
       }
+
       this.preparePageTracking();
       this.pageTrackIndex = 0;
       this.pageTrackNodeOffset = 0;
+      if (!this.pageTrackNodes.length) {
+        this.scheduleTrackingRetry();
+        await this.waitForTrackingNodes(1700);
+      }
       this.chunkIndex = 0;
       this.speakNext();
       this.sendEvent("play", 0);
@@ -404,8 +471,16 @@
       utterance.lang = this.lang || this.article.language || undefined;
       const voice = this.selectVoice();
       if (voice) utterance.voice = voice;
+      this.lastBoundaryHighlightAt = 0;
 
       utterance.onboundary = (event) => {
+        if (event.name !== "word") return;
+
+        const now =
+          typeof performance !== "undefined" ? performance.now() : Date.now();
+        if (now - this.lastBoundaryHighlightAt < 50) return;
+        this.lastBoundaryHighlightAt = now;
+
         const index = Number.isFinite(event.charIndex) ? event.charIndex : 0;
         this.highlightWordOnPage(this.getWordAtIndex(chunk, index));
       };
@@ -512,6 +587,53 @@
       this.pageTrackNodes = nodes;
       this.pageTrackIndex = 0;
       this.pageTrackNodeOffset = 0;
+
+      if (this.showDebug) {
+        console.log(
+          "preparePageTracking node count",
+          this.pageTrackNodes.length,
+        );
+      }
+    }
+
+    scheduleTrackingRetry() {
+      this.clearTrackingRetry();
+      [500, 1500].forEach((delay) => {
+        const id = window.setTimeout(() => {
+          this.preparePageTracking();
+        }, delay);
+        this.trackingRetryTimers.push(id);
+      });
+    }
+
+    clearTrackingRetry() {
+      this.trackingRetryTimers.forEach((id) => window.clearTimeout(id));
+      this.trackingRetryTimers = [];
+    }
+
+    waitForTrackingNodes(timeoutMs) {
+      if (this.pageTrackNodes.length) {
+        return Promise.resolve(true);
+      }
+
+      const start = Date.now();
+      return new Promise((resolve) => {
+        const tick = () => {
+          if (this.pageTrackNodes.length) {
+            resolve(true);
+            return;
+          }
+
+          if (Date.now() - start >= timeoutMs) {
+            resolve(false);
+            return;
+          }
+
+          window.setTimeout(tick, 100);
+        };
+
+        tick();
+      });
     }
 
     isLikelyAdElement(element) {
