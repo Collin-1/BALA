@@ -68,8 +68,11 @@
       this.trackEnabled = this.getAttribute("track") === "true";
       this.showDebug = this.getAttribute("show-debug") === "true";
       this.pageTrackNodes = [];
-      this.pageTrackIndex = 0;
-      this.pageTrackNodeOffset = 0;
+      this.tokenMap = [];
+      this.chunkBaseTokenIndex = [];
+      this.globalTokenIndex = 0;
+      this.trackingRootSelectorUsed = "none";
+      this.excludedAdNodeCount = 0;
       this.pageTrackName = "bala-current-word";
       this.supportsCssHighlights =
         typeof window !== "undefined" &&
@@ -79,6 +82,8 @@
       this.pageTrackActiveEl = null;
       this.hostWasPinned = false;
       this.lastBoundaryHighlightAt = 0;
+      this.highlightWindowStart = 0;
+      this.highlightWindowCount = 0;
       this.trackingRetryTimers = [];
       this.speechSynthesisAvailable = "speechSynthesis" in window;
       this.build();
@@ -248,10 +253,25 @@
     applyPreferredSpeechSource() {
       if (!this.article) return;
 
-      const shouldUseDomSource = this.source === "dom" || this.trackEnabled;
+      const shouldUseDomSource = this.trackEnabled || this.source === "dom";
       if (!shouldUseDomSource) return;
 
       const domContent = this.extractReadableFromPage();
+      if (this.trackEnabled) {
+        this.article.cleanText = domContent.cleanText || "";
+        if (domContent.title) {
+          this.article.title = domContent.title;
+        }
+
+        const words = this.countWords(this.article.cleanText);
+        this.article.wordCount = words;
+        this.article.estimatedMinutes = Math.max(
+          1,
+          Math.round((words / 180) * 10) / 10,
+        );
+        return;
+      }
+
       if (!domContent.cleanText || domContent.cleanText.length < 120) return;
 
       this.article.cleanText = domContent.cleanText;
@@ -268,36 +288,18 @@
     }
 
     extractReadableFromPage() {
-      const root =
-        document.querySelector("article") ||
-        document.querySelector("main") ||
-        document.body;
+      const { root } = this.resolveTrackingRoot();
+      if (!root) {
+        return { title: "", cleanText: "" };
+      }
 
       const clone = root.cloneNode(true);
-      const noiseSelectors = [
-        "script",
-        "style",
-        "noscript",
-        "iframe",
-        "nav",
-        "footer",
-        "header",
-        "aside",
-        ".ad",
-        ".ads",
-        ".ad-banner",
-        ".ad-small",
-        ".advertisement",
-        ".sponsored",
-        ".sponsor",
-        ".promo",
-        "[id*=ad]",
-        "[class*=ad-]",
-        "[class*=advert]",
-        "[class*=sponsor]",
-      ];
+      const exclusionSet = this.collectAdExclusionSet(clone);
+      exclusionSet.forEach((el) => el.remove());
       clone
-        .querySelectorAll(noiseSelectors.join(","))
+        .querySelectorAll(
+          "script,style,noscript,iframe,nav,footer,header,aside,button,input,textarea",
+        )
         .forEach((el) => el.remove());
 
       const title =
@@ -317,6 +319,10 @@
 
     countWords(text) {
       return (text.match(/\b\w+\b/g) || []).length;
+    }
+
+    countTokens(text) {
+      return (text.match(/[\p{L}\p{N}']+/gu) || []).length;
     }
 
     prepareChunks() {
@@ -347,6 +353,12 @@
       }
       this.chunks = parts;
       this.chunkIndex = 0;
+      this.chunkBaseTokenIndex = [];
+      let running = 0;
+      for (const part of parts) {
+        this.chunkBaseTokenIndex.push(running);
+        running += this.countTokens(part);
+      }
     }
 
     resolveSpeechTitle() {
@@ -418,9 +430,8 @@
       }
 
       this.preparePageTracking();
-      this.pageTrackIndex = 0;
-      this.pageTrackNodeOffset = 0;
-      if (!this.pageTrackNodes.length) {
+      this.globalTokenIndex = 0;
+      if (!this.tokenMap.length) {
         this.scheduleTrackingRetry();
         await this.waitForTrackingNodes(1700);
       }
@@ -472,6 +483,9 @@
       const voice = this.selectVoice();
       if (voice) utterance.voice = voice;
       this.lastBoundaryHighlightAt = 0;
+      this.highlightWindowStart =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+      this.highlightWindowCount = 0;
 
       utterance.onboundary = (event) => {
         if (event.name !== "word") return;
@@ -482,7 +496,10 @@
         this.lastBoundaryHighlightAt = now;
 
         const index = Number.isFinite(event.charIndex) ? event.charIndex : 0;
-        this.highlightWordOnPage(this.getWordAtIndex(chunk, index));
+        const safeIndex = Math.max(0, Math.min(index, chunk.length));
+        const chunkTokenIndex = this.countTokens(chunk.slice(0, safeIndex));
+        const chunkBase = this.chunkBaseTokenIndex[this.chunkIndex] || 0;
+        this.highlightTokenByIndex(chunkBase + chunkTokenIndex);
       };
 
       utterance.onend = () => {
@@ -499,7 +516,9 @@
 
       this.isSpeaking = true;
       speechSynthesis.speak(utterance);
-      this.highlightWordOnPage(this.getWordAtIndex(chunk, 0));
+      this.highlightTokenByIndex(
+        this.chunkBaseTokenIndex[this.chunkIndex] || 0,
+      );
       this.setStatus(
         `Playing chunk ${this.chunkIndex + 1}/${this.chunks.length}`,
       );
@@ -548,10 +567,29 @@
 
     preparePageTracking() {
       this.ensurePageHighlightStyle();
-      const root =
-        document.querySelector("article") ||
-        document.querySelector("main") ||
-        document.body;
+      const { root, selectorUsed } = this.resolveTrackingRoot();
+      this.trackingRootSelectorUsed = selectorUsed;
+      if (!root) {
+        this.pageTrackNodes = [];
+        this.tokenMap = [];
+        this.excludedAdNodeCount = 0;
+        if (this.showDebug) {
+          console.log(
+            "chosen tracking root selector",
+            this.trackingRootSelectorUsed,
+          );
+          console.log("ad nodes excluded count", this.excludedAdNodeCount);
+          console.log(
+            "preparePageTracking node count",
+            this.pageTrackNodes.length,
+          );
+          console.log("token map size", this.tokenMap.length);
+        }
+        return;
+      }
+
+      const exclusionSet = this.collectAdExclusionSet(root);
+      this.excludedAdNodeCount = exclusionSet.size;
 
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
         acceptNode: (node) => {
@@ -562,7 +600,9 @@
           const parent = node.parentElement;
           if (!parent) return NodeFilter.FILTER_REJECT;
           if (parent.closest("bala-reader")) return NodeFilter.FILTER_REJECT;
-          if (this.isLikelyAdElement(parent)) return NodeFilter.FILTER_REJECT;
+          if (this.isInExclusionSet(parent, exclusionSet)) {
+            return NodeFilter.FILTER_REJECT;
+          }
 
           const tag = parent.tagName.toLowerCase();
           const blocked = [
@@ -585,15 +625,108 @@
       }
 
       this.pageTrackNodes = nodes;
-      this.pageTrackIndex = 0;
-      this.pageTrackNodeOffset = 0;
+      this.tokenMap = this.buildTokenMap(nodes);
 
       if (this.showDebug) {
+        console.log(
+          "chosen tracking root selector",
+          this.trackingRootSelectorUsed,
+        );
+        console.log("ad nodes excluded count", this.excludedAdNodeCount);
         console.log(
           "preparePageTracking node count",
           this.pageTrackNodes.length,
         );
+        console.log("token map size", this.tokenMap.length);
       }
+    }
+
+    resolveTrackingRoot() {
+      const customSelector = this.getAttribute("content-selector");
+      if (customSelector) {
+        try {
+          const customRoot = document.querySelector(customSelector);
+          if (customRoot) {
+            return { root: customRoot, selectorUsed: customSelector };
+          }
+        } catch {
+          // Ignore invalid custom selector and continue fallback chain.
+        }
+      }
+
+      const articleContentRoot = document.querySelector(".article-content");
+      if (articleContentRoot) {
+        return { root: articleContentRoot, selectorUsed: ".article-content" };
+      }
+
+      const articleRoot = document.querySelector("article");
+      if (articleRoot) {
+        return { root: articleRoot, selectorUsed: "article" };
+      }
+
+      const mainRoot = document.querySelector("main");
+      if (mainRoot) {
+        return { root: mainRoot, selectorUsed: "main" };
+      }
+
+      return { root: null, selectorUsed: "none" };
+    }
+
+    collectAdExclusionSet(root) {
+      const set = new Set();
+      const selectors = [
+        ".ad-banner",
+        ".ad-small",
+        ".advertisement",
+        ".sponsored",
+        ".promo",
+        "[data-ad]",
+        "[aria-label*=advert i]",
+      ];
+
+      root.querySelectorAll(selectors.join(",")).forEach((el) => set.add(el));
+      root.querySelectorAll("*").forEach((el) => {
+        if (el.querySelector?.(".ad-label")) {
+          set.add(el);
+          return;
+        }
+
+        const text = (el.textContent || "").trim();
+        if (text === "Advertisement" || text === "Sponsored") {
+          set.add(el);
+        }
+      });
+
+      return set;
+    }
+
+    isInExclusionSet(element, exclusionSet) {
+      let current = element;
+      while (current) {
+        if (exclusionSet.has(current)) return true;
+        current = current.parentElement;
+      }
+      return false;
+    }
+
+    buildTokenMap(textNodes) {
+      const map = [];
+      for (const node of textNodes) {
+        const text = node.textContent || "";
+        const tokenRegex = /[\p{L}\p{N}']+/gu;
+        let match;
+        while ((match = tokenRegex.exec(text)) !== null) {
+          const raw = match[0];
+          map.push({
+            node,
+            start: match.index,
+            end: match.index + raw.length,
+            tokenNormalized: raw.replace(/[\W_]+/g, "").toLowerCase(),
+            tokenRaw: raw,
+          });
+        }
+      }
+      return map;
     }
 
     scheduleTrackingRetry() {
@@ -612,14 +745,14 @@
     }
 
     waitForTrackingNodes(timeoutMs) {
-      if (this.pageTrackNodes.length) {
+      if (this.tokenMap.length) {
         return Promise.resolve(true);
       }
 
       const start = Date.now();
       return new Promise((resolve) => {
         const tick = () => {
-          if (this.pageTrackNodes.length) {
+          if (this.tokenMap.length) {
             resolve(true);
             return;
           }
@@ -634,31 +767,6 @@
 
         tick();
       });
-    }
-
-    isLikelyAdElement(element) {
-      const noisyFragments = [
-        "ad",
-        "ads",
-        "advert",
-        "sponsor",
-        "promo",
-        "banner",
-        "sponsored",
-      ];
-
-      let current = element;
-      while (current && current !== document.body) {
-        const cls = (current.className || "").toString().toLowerCase();
-        const id = (current.id || "").toLowerCase();
-        const attrs = `${cls} ${id}`;
-        if (noisyFragments.some((frag) => attrs.includes(frag))) {
-          return true;
-        }
-        current = current.parentElement;
-      }
-
-      return false;
     }
 
     ensurePageHighlightStyle() {
@@ -681,90 +789,59 @@
       document.head.appendChild(style);
     }
 
-    getWordAtIndex(text, charIndex) {
-      if (!text) return "";
-      if (charIndex < 0) charIndex = 0;
-      if (charIndex >= text.length) charIndex = text.length - 1;
-
-      let index = charIndex;
-      if (!this.isWordChar(text[index])) {
-        let right = index;
-        while (right < text.length && !this.isWordChar(text[right])) right += 1;
-        if (right < text.length) {
-          index = right;
-        } else {
-          let left = index;
-          while (left >= 0 && !this.isWordChar(text[left])) left -= 1;
-          if (left < 0) return "";
-          index = left;
-        }
-      }
-
-      let start = index;
-      while (start > 0 && this.isWordChar(text[start - 1])) start -= 1;
-      let end = index;
-      while (end < text.length && this.isWordChar(text[end])) end += 1;
-
-      return text.slice(start, end);
-    }
-
-    isWordChar(char) {
-      return !!char && /[\p{L}\p{N}']/u.test(char);
-    }
-
-    highlightWordOnPage(word) {
+    highlightTokenByIndex(nextIndex) {
       if (!this.trackEnabled) return;
-      const target = (word || "").replace(/[\W_]+/g, "").toLowerCase();
+      if (!this.tokenMap.length) return;
+      if (!Number.isFinite(nextIndex)) return;
+      if (nextIndex < this.globalTokenIndex) return;
 
-      if (!target || target.length < 2) {
-        return;
-      }
+      const bounded = Math.min(nextIndex, this.tokenMap.length - 1);
+      const token = this.tokenMap[bounded];
+      if (!token || !token.node?.isConnected) return;
 
-      if (!this.pageTrackNodes.length) {
-        this.preparePageTracking();
-      }
+      try {
+        const range = document.createRange();
+        range.setStart(token.node, token.start);
+        range.setEnd(token.node, token.end);
 
-      for (
-        let index = this.pageTrackIndex;
-        index < this.pageTrackNodes.length;
-        index += 1
-      ) {
-        const node = this.pageTrackNodes[index];
-        const text = node?.textContent || "";
-        const startAt =
-          index === this.pageTrackIndex ? this.pageTrackNodeOffset : 0;
-        let tokenMatch = this.findTokenMatch(text, target, startAt);
-
-        if (!tokenMatch) {
-          tokenMatch = this.findNextToken(text, startAt);
+        this.clearPageHighlight();
+        if (this.supportsCssHighlights) {
+          const highlight = new Highlight(range);
+          CSS.highlights.set(this.pageTrackName, highlight);
+          this.pageTrackActiveEl = null;
+        } else {
+          const span = document.createElement("span");
+          span.className = "bala-page-highlight";
+          range.surroundContents(span);
+          this.pageTrackActiveEl = span;
         }
 
-        if (tokenMatch) {
-          try {
-            const range = document.createRange();
-            range.setStart(node, tokenMatch.start);
-            range.setEnd(node, tokenMatch.end);
+        this.globalTokenIndex = bounded;
+        this.recordHighlightTick();
+      } catch {
+        // Keep previous highlight if this token cannot be represented as a range.
+      }
+    }
 
-            this.clearPageHighlight();
+    recordHighlightTick() {
+      const now =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (!this.highlightWindowStart) {
+        this.highlightWindowStart = now;
+      }
 
-            if (this.supportsCssHighlights) {
-              const highlight = new Highlight(range);
-              CSS.highlights.set(this.pageTrackName, highlight);
-              this.pageTrackActiveEl = null;
-            } else {
-              const span = document.createElement("span");
-              span.className = "bala-page-highlight";
-              range.surroundContents(span);
-              this.pageTrackActiveEl = span;
-            }
-
-            this.pageTrackIndex = index;
-            this.pageTrackNodeOffset = tokenMatch.end;
-            return;
-          } catch {
-            // Continue searching if this node cannot be wrapped safely.
-          }
+      this.highlightWindowCount += 1;
+      const elapsed = now - this.highlightWindowStart;
+      if (elapsed >= 1000) {
+        if (this.showDebug) {
+          const updatesPerSecond = this.highlightWindowCount / (elapsed / 1000);
+          console.log(
+            "highlight updates/sec (approx)",
+            Number(updatesPerSecond.toFixed(1)),
+          );
         }
+        this.highlightWindowStart = now;
+        this.highlightWindowCount = 0;
       }
     }
 
@@ -784,38 +861,6 @@
       parent.replaceChild(textNode, el);
       if (parent.normalize) parent.normalize();
       this.pageTrackActiveEl = null;
-    }
-
-    findTokenMatch(text, normalizedTarget, startAt) {
-      if (!text || startAt >= text.length) return null;
-      const tokenRegex = /\S+/g;
-      tokenRegex.lastIndex = startAt;
-
-      let match;
-      while ((match = tokenRegex.exec(text)) !== null) {
-        const raw = match[0];
-        const normalized = raw.replace(/[\W_]+/g, "").toLowerCase();
-        if (normalized === normalizedTarget) {
-          return {
-            start: match.index,
-            end: match.index + raw.length,
-          };
-        }
-      }
-
-      return null;
-    }
-
-    findNextToken(text, startAt) {
-      if (!text || startAt >= text.length) return null;
-      const tokenRegex = /\S+/g;
-      tokenRegex.lastIndex = startAt;
-      const match = tokenRegex.exec(text);
-      if (!match) return null;
-      return {
-        start: match.index,
-        end: match.index + match[0].length,
-      };
     }
 
     setPinnedForReading(enabled) {
