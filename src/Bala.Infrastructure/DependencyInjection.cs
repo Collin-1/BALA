@@ -15,6 +15,8 @@ public static class DependencyInjection
     {
         var connectionString = configuration.GetConnectionString("Default") ?? "Data Source=bala.db";
 
+        services.Configure<ExtractionOptions>(configuration.GetSection("Extraction"));
+
         services.AddDbContext<BalaDbContext>(options =>
         {
             options.UseSqlite(connectionString);
