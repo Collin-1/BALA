@@ -1,22 +1,45 @@
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 using Bala.Application;
 using Bala.Application.Services;
+using Bala.Application.Options;
 using Bala.Shared;
 using Bala.Infrastructure;
 using Bala.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.Configure<ArticleCacheOptions>(builder.Configuration.GetSection("ArticleCache"));
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("BalaCors", policy =>
     {
         policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
     });
+});
+builder.Services.AddRateLimiter(options =>
+{
+    var permitLimit = builder.Configuration.GetValue<int?>("RateLimiting:PermitLimit") ?? 60;
+    var windowSeconds = builder.Configuration.GetValue<int?>("RateLimiting:WindowSeconds") ?? 60;
+    var queueLimit = builder.Configuration.GetValue<int?>("RateLimiting:QueueLimit") ?? 0;
+
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("bala", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = permitLimit,
+                Window = TimeSpan.FromSeconds(windowSeconds),
+                QueueLimit = queueLimit,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                AutoReplenishment = true
+            }));
 });
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
@@ -28,12 +51,23 @@ var app = builder.Build();
 await EnsureDatabaseAsync(app.Services);
 
 app.UseCors("BalaCors");
+app.UseRateLimiter();
 app.UseStaticFiles();
 
 app.MapGet("/health", () => Results.Text("ok", "text/plain"));
 
-app.MapGet("/v1/articles/by-url", async ([FromQuery] string url, [FromQuery] bool? refresh, IArticleService service, HttpContext http, CancellationToken cancellationToken) =>
+app.MapGet("/v1/articles/by-url", async (
+    [FromQuery] string url,
+    [FromQuery] bool? refresh,
+    IArticleService service,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken) =>
 {
+    if (string.IsNullOrWhiteSpace(url) || url.Length > 2048)
+    {
+        return Results.Json(ApiResponse<object>.Fail("invalid_url", "URL must be a valid absolute http/https URL."), statusCode: StatusCodes.Status400BadRequest);
+    }
+
     if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed) || (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps))
     {
         return Results.Json(ApiResponse<object>.Fail("invalid_url", "URL must be absolute http/https."), statusCode: StatusCodes.Status400BadRequest);
@@ -46,16 +80,23 @@ app.MapGet("/v1/articles/by-url", async ([FromQuery] string url, [FromQuery] boo
     }
     catch (TimeoutException ex)
     {
+        logger.LogWarning(ex, "Extraction timeout for {Url}", parsed.ToString());
         return Results.Json(ApiResponse<object>.Fail("extraction_failed", "Timed out while extracting article.", ex.Message), statusCode: StatusCodes.Status422UnprocessableEntity);
     }
     catch (Exception ex)
     {
+        logger.LogError(ex, "Error extracting article for {Url}", parsed.ToString());
         return Results.Json(ApiResponse<object>.Fail("server_error", "Unexpected error while fetching article.", ex.Message), statusCode: StatusCodes.Status500InternalServerError);
     }
-});
+}).RequireRateLimiting("bala");
 
 app.MapGet("/v1/articles/{articleId}", async (string articleId, IArticleService service, CancellationToken cancellationToken) =>
 {
+    if (string.IsNullOrWhiteSpace(articleId))
+    {
+        return Results.Json(ApiResponse<object>.Fail("invalid_article", "Article ID is required."), statusCode: StatusCodes.Status400BadRequest);
+    }
+
     var result = await service.GetByIdAsync(articleId, cancellationToken);
     if (result == null)
     {
@@ -63,7 +104,7 @@ app.MapGet("/v1/articles/{articleId}", async (string articleId, IArticleService 
     }
 
     return Results.Json(ApiResponse<ArticleResponse>.Ok(ArticleResponse.From(result)));
-});
+}).RequireRateLimiting("bala");
 
 app.MapPost("/v1/articles/from-html", async ([FromBody] FromHtmlRequest request, IArticleService service, CancellationToken cancellationToken) =>
 {
@@ -72,22 +113,46 @@ app.MapPost("/v1/articles/from-html", async ([FromBody] FromHtmlRequest request,
         return Results.Json(ApiResponse<object>.Fail("invalid_body", "Html is required."), statusCode: StatusCodes.Status400BadRequest);
     }
 
+    if (request.Html.Length > 1_000_000)
+    {
+        return Results.Json(ApiResponse<object>.Fail("payload_too_large", "Html payload too large."), statusCode: StatusCodes.Status413PayloadTooLarge);
+    }
+
+    if (!string.IsNullOrWhiteSpace(request.SourceUrl) && !Uri.TryCreate(request.SourceUrl, UriKind.Absolute, out _))
+    {
+        return Results.Json(ApiResponse<object>.Fail("invalid_url", "SourceUrl must be absolute."), statusCode: StatusCodes.Status400BadRequest);
+    }
+
     var result = await service.CreateFromHtmlAsync(request.SourceUrl, request.Title, request.Html, cancellationToken);
     return Results.Json(ApiResponse<ArticleResponse>.Ok(ArticleResponse.From(result)), statusCode: StatusCodes.Status201Created);
-});
+}).RequireRateLimiting("bala");
 
-app.MapPost("/v1/events/listen", async ([FromBody] ListenEventRequest request, IListenEventService service, HttpContext context, CancellationToken cancellationToken) =>
+app.MapPost("/v1/events/listen", async (
+    [FromBody] ListenEventRequest request,
+    IListenEventService service,
+    HttpContext context,
+    CancellationToken cancellationToken) =>
 {
     if (!ListenEventRequest.ValidTypes.Contains(request.EventType))
     {
         return Results.Json(ApiResponse<object>.Fail("invalid_event", "Unsupported event type."), statusCode: StatusCodes.Status400BadRequest);
     }
 
+    if (string.IsNullOrWhiteSpace(request.ArticleId) || string.IsNullOrWhiteSpace(request.SessionId))
+    {
+        return Results.Json(ApiResponse<object>.Fail("invalid_event", "ArticleId and SessionId are required."), statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    if (request.PositionSeconds < 0 || request.PositionSeconds > 86_400)
+    {
+        return Results.Json(ApiResponse<object>.Fail("invalid_event", "PositionSeconds must be within a valid range."), statusCode: StatusCodes.Status400BadRequest);
+    }
+
     var ua = request.UserAgent ?? context.Request.Headers.UserAgent.ToString();
     var record = new ListenEventRecord(request.ArticleId, request.SessionId, request.EventType, request.PositionSeconds, ua, request.Referrer, request.PageUrl);
     await service.RecordAsync(record, cancellationToken);
     return Results.StatusCode(StatusCodes.Status204NoContent);
-});
+}).RequireRateLimiting("bala");
 
 app.MapGet("/embed/v1/widget", async context =>
 {
