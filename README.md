@@ -1,5 +1,7 @@
 # Bala ("to read")
 
+For a full technical and product handoff document, see [PROJECT_BRIEF.md](PROJECT_BRIEF.md).
+
 Production-ready MVP that turns any public article URL into cleaned text, caches it in SQLite, and exposes an embeddable Web Speech widget.
 
 ## Stack

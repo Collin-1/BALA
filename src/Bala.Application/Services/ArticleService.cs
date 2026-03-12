@@ -1,6 +1,10 @@
+using System.Diagnostics;
 using Bala.Application.Models;
+using Bala.Application.Options;
 using Bala.Application.Repositories;
 using Bala.Domain.Entities;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Bala.Application.Services;
 
@@ -9,24 +13,55 @@ public class ArticleService : IArticleService
     private readonly IArticleRepository _repository;
     private readonly IArticleExtractor _extractor;
     private readonly IHtmlToTextConverter _converter;
+    private readonly ILogger<ArticleService> _logger;
+    private readonly ArticleCacheOptions _cacheOptions;
 
-    public ArticleService(IArticleRepository repository, IArticleExtractor extractor, IHtmlToTextConverter converter)
+    public ArticleService(
+        IArticleRepository repository,
+        IArticleExtractor extractor,
+        IHtmlToTextConverter converter,
+        ILogger<ArticleService> logger,
+        IOptions<ArticleCacheOptions> cacheOptions)
     {
         _repository = repository;
         _extractor = extractor;
         _converter = converter;
+        _logger = logger;
+        _cacheOptions = cacheOptions.Value;
     }
 
     public async Task<ArticleResult> GetByUrlAsync(string url, bool refresh, CancellationToken cancellationToken = default)
     {
+        var now = DateTime.UtcNow;
         var existing = await _repository.GetBySourceUrlAsync(url, cancellationToken);
-        if (!refresh && existing != null)
+        var lastRefreshedAt = existing?.LastRefreshedAt ?? existing?.CreatedAt;
+        var maxAge = TimeSpan.FromMinutes(Math.Max(1, _cacheOptions.MaxAgeMinutes));
+        var isFresh = existing != null && !refresh && lastRefreshedAt.HasValue && (now - lastRefreshedAt.Value) <= maxAge;
+        if (isFresh)
         {
             return Map(existing);
         }
 
-        var extracted = await _extractor.ExtractAsync(url, cancellationToken);
-        var now = DateTime.UtcNow;
+        var stopwatch = Stopwatch.StartNew();
+        ExtractedArticle extracted;
+        try
+        {
+            extracted = await _extractor.ExtractAsync(url, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Extraction failed for {Url}", url);
+            if (existing != null && _cacheOptions.AllowStaleOnError)
+            {
+                return Map(existing);
+            }
+
+            throw;
+        }
+        finally
+        {
+            _logger.LogInformation("Extraction duration {ElapsedMs}ms for {Url}", stopwatch.ElapsedMilliseconds, url);
+        }
 
         if (existing == null)
         {

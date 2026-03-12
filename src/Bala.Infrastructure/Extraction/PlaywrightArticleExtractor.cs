@@ -1,43 +1,92 @@
+using System.Diagnostics;
 using Bala.Application.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.Playwright;
 
 namespace Bala.Infrastructure.Extraction;
 
+/// <summary>
+/// Extracts readable article content using Playwright.
+/// </summary>
 public class PlaywrightArticleExtractor : IArticleExtractor, IAsyncDisposable
 {
     private readonly IHtmlToTextConverter _converter;
+    private readonly ExtractionOptions _options;
+    private readonly ILogger<PlaywrightArticleExtractor> _logger;
     private readonly SemaphoreSlim _browserLock = new(1, 1);
     private IPlaywright? _playwright;
     private Task<IBrowser>? _browserTask;
     private bool _disposed;
 
-    public PlaywrightArticleExtractor(IHtmlToTextConverter converter)
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PlaywrightArticleExtractor"/> class.
+    /// </summary>
+    public PlaywrightArticleExtractor(
+        IHtmlToTextConverter converter,
+        IOptions<ExtractionOptions> options,
+        ILogger<PlaywrightArticleExtractor> logger)
     {
         _converter = converter;
+        _options = options.Value;
+        _logger = logger;
     }
 
+    /// <summary>
+    /// Extracts article content from the given URL.
+    /// </summary>
     public async Task<ExtractedArticle> ExtractAsync(string url, CancellationToken cancellationToken = default)
     {
-        var browser = await GetBrowserAsync(cancellationToken);
-        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
+        var attempt = 0;
+        Exception? lastError = null;
+        var maxRetries = Math.Max(0, _options.MaxRetries);
+
+        while (attempt <= maxRetries)
         {
-            ViewportSize = null
-        });
-        var page = await context.NewPageAsync();
-        page.SetDefaultTimeout(25000);
+            var stopwatch = Stopwatch.StartNew();
+            try
+            {
+                var browser = await GetBrowserAsync(cancellationToken);
+                await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
+                {
+                    ViewportSize = null
+                });
+                var page = await context.NewPageAsync();
+                page.SetDefaultTimeout(_options.NavigationTimeoutMs);
 
-        await page.GotoAsync(url, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
-        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+                await page.GotoAsync(url, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+                await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-        var html = await ExtractMainContentHtmlAsync(page);
+                var html = await ExtractMainContentHtmlAsync(page);
 
-        var cleanText = _converter.Convert(html);
-        var language = _converter.DetectLanguage(cleanText);
-        var (wordCount, estimatedMinutes) = _converter.CalculateReadingStats(cleanText);
-        var hash = _converter.ComputeHash(cleanText);
-        var title = await ExtractBestTitleAsync(page, url);
+                var cleanText = _converter.Convert(html);
+                var language = _converter.DetectLanguage(cleanText);
+                var (wordCount, estimatedMinutes) = _converter.CalculateReadingStats(cleanText);
+                var hash = _converter.ComputeHash(cleanText);
+                var title = await ExtractBestTitleAsync(page, url);
 
-        return new ExtractedArticle(url, title, cleanText, language, wordCount, estimatedMinutes, hash);
+                _logger.LogInformation(
+                    "Extracted article {Url} in {ElapsedMs}ms",
+                    url,
+                    stopwatch.ElapsedMilliseconds);
+
+                return new ExtractedArticle(url, title, cleanText, language, wordCount, estimatedMinutes, hash);
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested && attempt < maxRetries)
+            {
+                lastError = ex;
+                attempt += 1;
+                _logger.LogWarning(ex, "Extraction attempt {Attempt} failed for {Url}", attempt, url);
+                await Task.Delay(_options.RetryDelayMs, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Extraction failed for {Url}", url);
+                throw;
+            }
+        }
+
+        throw lastError ?? new TimeoutException("Extraction failed.");
     }
 
     private static async Task<string?> ExtractBestTitleAsync(IPage page, string url)
@@ -138,6 +187,9 @@ public class PlaywrightArticleExtractor : IArticleExtractor, IAsyncDisposable
         });
     }
 
+    /// <summary>
+    /// Disposes the Playwright browser resources.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
