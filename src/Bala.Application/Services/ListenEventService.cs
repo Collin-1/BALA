@@ -3,15 +3,24 @@ using Bala.Domain.Entities;
 
 namespace Bala.Application.Services;
 
+/// <summary>
+/// Persists listen events in the data store.
+/// </summary>
 public class ListenEventService : IListenEventService
 {
     private readonly IListenEventRepository _repository;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ListenEventService"/> class.
+    /// </summary>
     public ListenEventService(IListenEventRepository repository)
     {
         _repository = repository;
     }
 
+    /// <summary>
+    /// Records a listen event.
+    /// </summary>
     public async Task RecordAsync(ListenEventRecord record, CancellationToken cancellationToken = default)
     {
         var entity = new ListenEvent
