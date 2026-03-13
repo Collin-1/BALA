@@ -330,14 +330,21 @@ class BalaReader extends HTMLElement {
         voiceQuery: this.voiceQuery,
         language: this.lang,
       });
+      const trackerText = this.trackEnabled ? this.tracker.getTokenText() : "";
+      const speechText = trackerText || this.article.cleanText || "";
+      const speechTitle = this.trackEnabled ? "" : this.resolveSpeechTitle();
+
       this.speech.setContent({
-        title: this.resolveSpeechTitle(),
-        text: this.article.cleanText || "",
+        title: speechTitle,
+        text: speechText,
         language: this.article.language || this.lang,
       });
       this.metrics.chunkCount = this.speech.chunks.length;
       this.metrics.tokenCount = this.tracker.tokenMap.length;
       this.logger.debug("metrics", this.metrics);
+      if (this.trackEnabled && this.tracker.tokenMap.length) {
+        this.tracker.highlightTokenByIndex(0);
+      }
       this.speech.play();
       this.sendEvent("play", 0);
     });

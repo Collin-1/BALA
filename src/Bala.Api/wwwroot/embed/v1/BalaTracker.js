@@ -25,6 +25,7 @@ export class BalaTracker {
     this.logger = logger;
     this.throttleMs = throttleMs;
     this.tokenMap = [];
+    this.tokenText = "";
     this.globalTokenIndex = 0;
     this.lastHighlightAt = 0;
     this.highlightWindowStart = 0;
@@ -41,6 +42,7 @@ export class BalaTracker {
     this.root = root;
     this.exclusionSet = this.collectExclusions(root, exclusionSelectors);
     this.tokenMap = this.buildTokenMap(this.collectTextNodes(root));
+    this.tokenText = this.buildTokenText(this.tokenMap);
     this.globalTokenIndex = 0;
     this.dirty = false;
     this.logger?.debug("token map size", this.tokenMap.length);
@@ -49,6 +51,10 @@ export class BalaTracker {
 
   reset() {
     this.globalTokenIndex = 0;
+  }
+
+  getTokenText() {
+    return this.tokenText;
   }
 
   setPlaying(isPlaying) {
@@ -103,6 +109,7 @@ export class BalaTracker {
     this.clearHighlight();
     this.disconnectObserver();
     this.tokenMap = [];
+    this.tokenText = "";
     this.root = null;
     this.exclusionSet = new Set();
   }
@@ -152,6 +159,10 @@ export class BalaTracker {
       }
     }
     return map;
+  }
+
+  buildTokenText(tokenMap) {
+    return tokenMap.map((token) => token.tokenRaw).join(" ");
   }
 
   collectExclusions(root, selectors) {
