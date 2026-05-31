@@ -6,7 +6,6 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Bala.Application\Bala.Application.csproj" />
     <ProjectReference Include="..\Bala.Shared\Bala.Shared.csproj" />
   </ItemGroup>
 </Project>
