@@ -7,7 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Bala.Application\Bala.Application.csproj" />
-    <ProjectReference Include="..\Bala.Domain\Bala.Domain.csproj" />
     <ProjectReference Include="..\Bala.Shared\Bala.Shared.csproj" />
   </ItemGroup>
 </Project>

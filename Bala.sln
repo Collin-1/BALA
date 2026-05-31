@@ -6,10 +6,6 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Bala.Api", "src\Bala.Api\Ba
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Bala.Application", "src\Bala.Application\Bala.Application.csproj", "{7D9C6D5B-2E08-4C9B-8472-F863A06DB0BA}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Bala.Domain", "src\Bala.Domain\Bala.Domain.csproj", "{2C8A7B0C-0F36-4B40-8B82-542E1D5C9964}"
-EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Bala.Infrastructure", "src\Bala.Infrastructure\Bala.Infrastructure.csproj", "{B2D9CB52-91DB-4EE4-9C3A-927AED0B1EF3}"
-EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Bala.Shared", "src\Bala.Shared\Bala.Shared.csproj", "{CDB1A8B3-9E0A-4A0E-8EAA-ED3D1F2D2BC3}"
 EndProject
 Global
@@ -26,14 +22,6 @@ Global
 		{7D9C6D5B-2E08-4C9B-8472-F863A06DB0BA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7D9C6D5B-2E08-4C9B-8472-F863A06DB0BA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7D9C6D5B-2E08-4C9B-8472-F863A06DB0BA}.Release|Any CPU.Build.0 = Release|Any CPU
-		{2C8A7B0C-0F36-4B40-8B82-542E1D5C9964}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{2C8A7B0C-0F36-4B40-8B82-542E1D5C9964}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{2C8A7B0C-0F36-4B40-8B82-542E1D5C9964}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{2C8A7B0C-0F36-4B40-8B82-542E1D5C9964}.Release|Any CPU.Build.0 = Release|Any CPU
-		{B2D9CB52-91DB-4EE4-9C3A-927AED0B1EF3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{B2D9CB52-91DB-4EE4-9C3A-927AED0B1EF3}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{B2D9CB52-91DB-4EE4-9C3A-927AED0B1EF3}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{B2D9CB52-91DB-4EE4-9C3A-927AED0B1EF3}.Release|Any CPU.Build.0 = Release|Any CPU
 		{CDB1A8B3-9E0A-4A0E-8EAA-ED3D1F2D2BC3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{CDB1A8B3-9E0A-4A0E-8EAA-ED3D1F2D2BC3}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CDB1A8B3-9E0A-4A0E-8EAA-ED3D1F2D2BC3}.Release|Any CPU.ActiveCfg = Release|Any CPU
