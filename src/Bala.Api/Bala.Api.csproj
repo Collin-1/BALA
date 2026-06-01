@@ -5,7 +5,4 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\Bala.Shared\Bala.Shared.csproj" />
-  </ItemGroup>
 </Project>
