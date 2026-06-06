@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>City Council Approves Riverfront Park Expansion — The Daily Bugle</title>
+  <meta name="author" content="Jane Reporter" />
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; background: #fafafa; }
+
+    /* ----- NAV BAR (should be excluded) ----- */
+    nav.site-nav { background: #11233a; color: #fff; padding: 12px 24px; display: flex; gap: 20px; font-family: Arial, sans-serif; font-size: 14px; }
+    nav.site-nav a { color: #cfe0ff; text-decoration: none; }
+
+    /* ----- COOKIE BANNER (should be excluded) ----- */
+    #cookie-banner { position: fixed; bottom: 0; left: 0; right: 0; background: #222; color: #eee; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; font-family: Arial, sans-serif; font-size: 14px; z-index: 9999; }
+    #cookie-banner button { background: #4f8cff; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+
+    /* ----- AD BLOCKS (should be excluded) ----- */
+    .ad, .advertisement { background: #fff7d6; border: 1px dashed #d4a017; color: #8a6d00; text-align: center; padding: 24px; margin: 20px 0; font-family: Arial, sans-serif; }
+    aside.sidebar { background: #f0f0f0; padding: 16px; font-family: Arial, sans-serif; }
+
+    .layout { display: grid; grid-template-columns: 1fr 300px; gap: 32px; max-width: 1100px; margin: 24px auto; padding: 0 24px; }
+    article { background: #fff; padding: 32px 40px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    article h1 { font-size: 32px; line-height: 1.2; margin-top: 0; }
+    article p { font-size: 18px; line-height: 1.7; }
+    .byline { color: #666; font-style: italic; font-family: Arial, sans-serif; font-size: 14px; }
+    footer.site-footer { background: #11233a; color: #9fb2cc; padding: 24px; text-align: center; font-family: Arial, sans-serif; font-size: 13px; margin-top: 40px; }
+  </style>
+</head>
+<body>
+
+  <!-- ============ NAVIGATION (junk) ============ -->
+  <nav class="site-nav">
+    <strong>The Daily Bugle</strong>
+    <a href="#">Home</a><a href="#">Politics</a><a href="#">Sports</a>
+    <a href="#">Business</a><a href="#">Opinion</a><a href="#">Subscribe Now</a>
+  </nav>
+
+  <!-- ============ LEADERBOARD AD (junk) ============ -->
+  <div class="advertisement">
+    🟨 ADVERTISEMENT — Buy SuperWidget Pro today! Limited time 70% off. Click here now!!!
+  </div>
+
+  <div class="layout">
+    <!-- ============ MAIN ARTICLE (the only thing TTS should read) ============ -->
+    <article>
+      <h1>City Council Approves Riverfront Park Expansion After Months of Debate</h1>
+      <p class="byline">By Jane Reporter · Published June 6, 2026</p>
+
+      <p>The city council voted 6 to 1 on Tuesday night to approve a long-debated expansion of Riverfront Park, clearing the way for twelve additional acres of green space along the eastern bank of the Miller River. The decision capped nearly eighteen months of public hearings, revised budgets, and at times heated disagreement among residents.</p>
+
+      <!-- Inline ad inside the article flow (junk) -->
+      <div class="ad">🟨 ADVERTISEMENT — Refinance your home in 3 minutes. Rates from 2.1%!</div>
+
+      <p>Under the approved plan, the expansion will add a riverside walking trail, two playgrounds, and a small amphitheater intended to host summer concerts. Construction is expected to begin in the autumn and finish by late next year, according to the Parks and Recreation Department.</p>
+
+      <p>"This is a win for every family in our city," said council member Aisha Okoro, who sponsored the measure. "Green space is not a luxury. It is infrastructure, and it is health, and our residents have asked for it again and again."</p>
+
+      <p>The lone dissenting vote came from council member Tom Halvorsen, who argued that the projected eight million dollar cost should instead be directed toward repaving the city's aging road network. "I support parks," he said, "but I cannot support borrowing against next year's budget to build one while Fourth Street falls apart."</p>
+
+      <p>City planners said the project will be funded through a combination of a state recreation grant and municipal bonds, and that no increase to the local property tax rate is anticipated. A spokesperson for the mayor's office added that the new trail will connect to the existing downtown greenway, creating a continuous four mile path along the river.</p>
+
+      <p>Public reaction at the meeting was largely supportive. More than forty residents signed up to speak during the comment period, with most urging the council to move forward. A small number raised concerns about parking and nighttime noise from the amphitheater, which planners said would be addressed with a 9 p.m. event curfew.</p>
+
+      <p>With the vote complete, the city will now solicit bids from contractors. Officials expect to award the construction contract within ninety days and to hold a groundbreaking ceremony before the first frost.</p>
+    </article>
+
+    <!-- ============ SIDEBAR (junk) ============ -->
+    <aside class="sidebar">
+      <div class="ad">🟨 ADVERTISEMENT<br />Win a free cruise!</div>
+      <h3>Most Popular</h3>
+      <ul>
+        <li><a href="#">Mayor announces re-election bid</a></li>
+        <li><a href="#">Local bakery wins national award</a></li>
+        <li><a href="#">Five hikes within an hour of downtown</a></li>
+      </ul>
+      <div class="ad">🟨 ADVERTISEMENT — Download our app!</div>
+    </aside>
+  </div>
+
+  <footer class="site-footer">
+    © 2026 The Daily Bugle · Terms · Privacy · Contact · This footer is navigation junk and should not be read aloud.
+  </footer>
+
+  <!-- ============ COOKIE BANNER (junk) ============ -->
+  <div id="cookie-banner">
+    <span>🍪 We use cookies to improve your experience. By continuing you accept our cookie policy.</span>
+    <button onclick="document.getElementById('cookie-banner').remove()">Accept all cookies</button>
+  </div>
+
+  <!-- ============ THE WIDGET — one script tag ============ -->
+  <script src="/embed.js" data-site="demo"></script>
+</body>
+</html>
