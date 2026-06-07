@@ -1,0 +1,11 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# .NET
+bin/
+obj/
+
+# OS
+.DS_Store
+Thumbs.db
