@@ -1,0 +1,13 @@
+{
+  "name": "listen-to-this-article",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Embeddable 'listen to this article' audio widget (vanilla JS embed + ASP.NET Core analytics backend).",
+  "scripts": {
+    "build": "node build-embed.js",
+    "test:extract": "node tools/test-extraction.js"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0"
+  }
+}
