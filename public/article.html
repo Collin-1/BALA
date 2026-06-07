@@ -17,8 +17,11 @@
     #cookie-banner { position: fixed; bottom: 0; left: 0; right: 0; background: #222; color: #eee; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; font-family: Arial, sans-serif; font-size: 14px; z-index: 9999; }
     #cookie-banner button { background: #4f8cff; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
 
-    /* ----- AD BLOCKS (should be excluded) ----- */
-    .ad, .advertisement { background: #fff7d6; border: 1px dashed #d4a017; color: #8a6d00; text-align: center; padding: 24px; margin: 20px 0; font-family: Arial, sans-serif; }
+    /* ----- AD BLOCKS (should be excluded) -----
+       Class/id tokens mirror real ad systems (Google Publisher Tag renders
+       <div id="div-gpt-ad-...">). Readability strips nodes whose class/id match
+       its "banner"/"-ad-" junk patterns — which is exactly what these carry. */
+    .ad-banner { background: #fff7d6; border: 1px dashed #d4a017; color: #8a6d00; text-align: center; padding: 24px; margin: 20px 0; font-family: Arial, sans-serif; }
     aside.sidebar { background: #f0f0f0; padding: 16px; font-family: Arial, sans-serif; }
 
     .layout { display: grid; grid-template-columns: 1fr 300px; gap: 32px; max-width: 1100px; margin: 24px auto; padding: 0 24px; }
@@ -39,7 +42,7 @@
   </nav>
 
   <!-- ============ LEADERBOARD AD (junk) ============ -->
-  <div class="advertisement">
+  <div class="ad-banner" id="div-gpt-ad-leaderboard">
     🟨 ADVERTISEMENT — Buy SuperWidget Pro today! Limited time 70% off. Click here now!!!
   </div>
 
@@ -52,7 +55,7 @@
       <p>The city council voted 6 to 1 on Tuesday night to approve a long-debated expansion of Riverfront Park, clearing the way for twelve additional acres of green space along the eastern bank of the Miller River. The decision capped nearly eighteen months of public hearings, revised budgets, and at times heated disagreement among residents.</p>
 
       <!-- Inline ad inside the article flow (junk) -->
-      <div class="ad">🟨 ADVERTISEMENT — Refinance your home in 3 minutes. Rates from 2.1%!</div>
+      <div class="ad-banner" id="div-gpt-ad-inline">🟨 ADVERTISEMENT — Refinance your home in 3 minutes. Rates from 2.1%!</div>
 
       <p>Under the approved plan, the expansion will add a riverside walking trail, two playgrounds, and a small amphitheater intended to host summer concerts. Construction is expected to begin in the autumn and finish by late next year, according to the Parks and Recreation Department.</p>
 
@@ -69,14 +72,14 @@
 
     <!-- ============ SIDEBAR (junk) ============ -->
     <aside class="sidebar">
-      <div class="ad">🟨 ADVERTISEMENT<br />Win a free cruise!</div>
+      <div class="ad-banner">🟨 ADVERTISEMENT<br />Win a free cruise!</div>
       <h3>Most Popular</h3>
       <ul>
         <li><a href="#">Mayor announces re-election bid</a></li>
         <li><a href="#">Local bakery wins national award</a></li>
         <li><a href="#">Five hikes within an hour of downtown</a></li>
       </ul>
-      <div class="ad">🟨 ADVERTISEMENT — Download our app!</div>
+      <div class="ad-banner">🟨 ADVERTISEMENT — Download our app!</div>
     </aside>
   </div>
 
